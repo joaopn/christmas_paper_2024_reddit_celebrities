@@ -1,1 +1,1 @@
-# christmas_paper_2024_reddit_celebrities
+# "Reddit celebrities" analysis code and results for the 2024 Christmas paper
