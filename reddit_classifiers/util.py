@@ -4,30 +4,35 @@ from tqdm import tqdm
 from datetime import datetime
 from dateutil import rrule
 
-def data_pipeline(file_pattern, end_date=None, data_type='both', submission_threshold=0.005, comment_threshold=0.001, word_count_threshold=20, verbose=True):
+def data_pipeline(file_pattern, end_date, start_date=None, data_type='both', submission_threshold=0.005, comment_threshold=0.001, word_count_threshold=20, user_threshold=0.0001, removed_users=['[deleted]', '[removed]', 'automoderator'], bot_filter=True, verbose=True):
     """
     Full data cleaning pipeline that:
     1. Loads data from CSV files
     2. Removes submission-heavy subreddits
-    3. Filters by word count
-    4. Removes duplicates
+    3. Removes high-volume users and bots
+    4. Filters by word count
+    5. Removes duplicates
     
     Prints statistics at each stage if verbose=True and cleans up intermediate data.
     
     Args:
         file_pattern (str): Pattern for the CSV files, e.g. 'folder/{}_identifier_{}.csv'
         end_date (str): End date in YYYY-MM format
+        start_date (str): Start date in YYYY-MM format. If None, defaults to 2005-06 for submissions and 2005-12 for comments
         data_type (str): Type of data to load - 'submissions', 'comments', or 'both'
         submission_threshold (float): Threshold for removing submission-heavy subreddits
         comment_threshold (float): Comment threshold for removing submission-heavy subreddits  
         word_count_threshold (int): Minimum word count to keep entries
+        user_threshold (float): Threshold for removing high-volume users
+        removed_users (list): List of users to remove
+        bot_filter (bool): Whether to remove users ending with 'bot'
         verbose (bool): Whether to print statistics at each stage
         
     Returns:
         dict: Dictionary with cleaned DataFrames
     """
     # Load data
-    data = load_data(file_pattern, end_date=end_date, data_type=data_type)
+    data = load_data(file_pattern, end_date=end_date, data_type=data_type, start_date=start_date)
     
     if verbose:
         print('RAW DATA:')
@@ -44,14 +49,27 @@ def data_pipeline(file_pattern, end_date=None, data_type='both', submission_thre
     if verbose:
         print('\nREMOVED SUBMISSION-HEAVY SUBREDDITS:')
         print_stats(data_removed)
+        
+    # Remove high-volume users and bots
+    data_filtered = remove_users(
+        data_removed,
+        threshold=user_threshold, 
+        bot_filter=bot_filter, 
+        users=removed_users
+    )
+    del data_removed
+    
+    if verbose:
+        print('\nREMOVED HIGH-VOLUME USERS:') 
+        print_stats(data_filtered)
     
     # Filter by word count
     data_clean = filter_threshold(
-        data_removed, 
+        data_filtered, 
         field='word_count', 
         threshold=word_count_threshold
     )
-    del data_removed
+    del data_filtered
     
     if verbose:
         print('\nCLEAN DATA:')
@@ -197,6 +215,17 @@ def print_stats(data_dict):
         for subreddit, count in subreddit_counts.head().items():
             percentage = (count / len(df)) * 100
             print(f"  {subreddit}: {count:,} entries ({percentage:.1f}%)")
+            
+        # Author stats
+        n_authors = df['author'].nunique()
+        print(f"\nNumber of unique authors: {n_authors:,}")
+        
+        # Top authors
+        print("\nTop 5 authors:")
+        author_counts = df['author'].value_counts()
+        for author, count in author_counts.head().items():
+            percentage = (count / len(df)) * 100
+            print(f"  {author}: {count:,} entries ({percentage:.1f}%)")
 
 def filter_threshold(data_dict, field='word_count', threshold=20):
     """
@@ -262,6 +291,64 @@ def remove_subreddits(data_dict, subreddits):
         print(f"\nRemoving subreddits from {key}: {len(df):,} -> {len(removed_dict[key]):,} entries ({len(df) - len(removed_dict[key]):,} removed)")
         
     return removed_dict
+
+def remove_users(data_dict, users=['[deleted]', '[removed]', 'automoderator'], bot_filter=True, threshold=0.001):
+    """
+    Remove entries from users in the specified list and optionally users ending with 'bot'.
+    Only removes users that have more than the threshold percentage of total content.
+    
+    Args:
+        data_dict (dict): Dictionary containing DataFrame with Reddit data
+        users (list): List of usernames to remove. Defaults to ['[deleted]', '[removed]']
+        bot_filter (bool): Whether to remove users ending with 'bot'. Defaults to True
+        threshold (float): Minimum percentage of total content (0-1) for a user to be removed
+        
+    Returns:
+        dict: Dictionary with filtered DataFrames
+    """
+    filtered_dict = {}
+    
+    for key, df in data_dict.items():
+        if df.empty:
+            filtered_dict[key] = df
+            continue
+            
+        # Calculate user percentages
+        user_counts = df['author'].value_counts()
+        total_entries = len(df)
+        user_pcts = user_counts / total_entries
+        
+        # Get users above threshold
+        users_to_remove = set(users)
+        users_above_threshold = set(user_pcts[user_pcts >= threshold].index)
+        
+        # Add bot users if enabled
+        if bot_filter:
+            bot_users = set(user_pcts.index[user_pcts.index.str.lower().str.endswith('bot')])
+            users_to_remove.update(bot_users)
+            
+        # Only remove users that are both in removal list and above threshold
+        users_to_remove = users_to_remove.intersection(users_above_threshold)
+        
+        # Filter DataFrame
+        filtered_dict[key] = df[~df['author'].isin(users_to_remove)]
+        
+        print(f"\nRemoving high-volume users from {key}: {len(df):,} -> {len(filtered_dict[key]):,} entries ({len(df) - len(filtered_dict[key]):,} removed)")
+        if len(users_to_remove) > 0:
+            # Split into bot users and regular users
+            bot_users = {u for u in users_to_remove if u.lower().endswith('bot')}
+            other_users = users_to_remove - bot_users
+            
+            # Count content from each group
+            bot_content = df[df['author'].isin(bot_users)].shape[0]
+            other_content = df[df['author'].isin(other_users)].shape[0]
+            
+            if other_content > 0:
+                print(f"Content removed from listed users: {other_content:,} entries")
+            if bot_content > 0:
+                print(f"Content removed from bot users: {bot_content:,} entries")
+            
+    return filtered_dict
 
 
 def remove_submission_heavy_subreddits(data_dict, submission_threshold=0.05, comment_threshold=0.02):
