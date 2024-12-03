@@ -2,6 +2,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from . import util
+import numpy as np
+from plotly.subplots import make_subplots
 
 def plot_volume(data_dict, title=None):
     """
@@ -238,8 +240,7 @@ def plot_distributions(data_dict, metrics, periods, title=None):
     Returns:
         plotly.graph_objects.Figure
     """
-    from plotly.subplots import make_subplots
-    import plotly.graph_objects as go
+
     
     # Generate period names from years
     period_names = [f"{start}-{end}" for start, end in periods]
@@ -252,13 +253,23 @@ def plot_distributions(data_dict, metrics, periods, title=None):
         vertical_spacing=0.1
     )
     
-    # Colors for different data types
     colors = {
         'submissions': tab10_to_hex('tab:orange'),
         'comments': tab10_to_hex('tab:blue')
     }
     
-    # Plot distributions for each metric and period
+    # Pre-compute bins for each metric
+    metric_bins = {}
+    for metric in metrics:
+        all_data = []
+        for df in data_dict.values():
+            if not df.empty:
+                all_data.extend(df[metric].values)
+        if all_data:
+            min_val = np.min(all_data)
+            max_val = np.max(all_data)
+            metric_bins[metric] = np.linspace(min_val, max_val, 51)  # 50 bins
+    
     for i, metric in enumerate(metrics, 1):
         for j, ((start_year, end_year), period_name) in enumerate(zip(periods, period_names), 1):
             
@@ -269,21 +280,24 @@ def plot_distributions(data_dict, metrics, periods, title=None):
                 # Create year column from dataset (YYYY-MM format)
                 df['year'] = df['dataset'].str[:4].astype(int)
                 
-                # Filter data for period using year column (inclusive)
+                # Filter data for period
                 mask = (df['year'] >= int(start_year)) & (df['year'] <= int(end_year))
                 period_data = df[mask][metric]
                 
-                # Add histogram trace
+                # Pre-compute histogram using the metric's global bins
+                counts, _ = np.histogram(period_data, bins=metric_bins[metric], density=True)
+                
+                # Add bar trace (more efficient than histogram)
                 fig.add_trace(
-                    go.Histogram(
-                        x=period_data,
+                    go.Bar(
+                        x=metric_bins[metric][:-1],
+                        y=counts,
                         name=data_type.capitalize(),
-                        nbinsx=50,
-                        histnorm='probability',
                         opacity=0.6,
                         showlegend=True if (i==1 and j==1) else False,
                         legendgroup=data_type,
-                        marker_color=colors[data_type]
+                        marker_color=colors[data_type],
+                        width=metric_bins[metric][1] - metric_bins[metric][0]  # Set bar width to bin size
                     ),
                     row=i, col=j
                 )
@@ -291,8 +305,12 @@ def plot_distributions(data_dict, metrics, periods, title=None):
                 # Drop temporary year column
                 df.drop('year', axis=1, inplace=True)
             
-            # Update axes labels
-            fig.update_xaxes(title_text=metric.capitalize(), row=i, col=j)
+            # Update axes labels and ranges
+            fig.update_xaxes(
+                title_text=metric.capitalize(), 
+                row=i, col=j,
+                range=[metric_bins[metric][0], metric_bins[metric][-1]]  # Set same range for all periods
+            )
             fig.update_yaxes(title_text='Probability' if j==1 else None, row=i, col=j)
     
     # Update layout
@@ -307,7 +325,7 @@ def plot_distributions(data_dict, metrics, periods, title=None):
             xanchor="left",
             x=1.02
         ),
-        barmode='overlay'  # Make histograms overlap
+        barmode='overlay'
     )
     
     return fig
@@ -345,3 +363,87 @@ def tab10_to_hex(tab_color):
     return tab10_colors[tab_color]
 
 
+def survey_dashboard(df):
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Trends Over Time', 'Demographic Comparison',
+                        'Score Heatmap', 'Year Comparison'),
+        specs=[[{"type": "scatter"}, {"type": "box"}],
+               [{"type": "heatmap"}, {"type": "box"}]],
+        vertical_spacing=0.12,  # Reduce space between rows
+        horizontal_spacing=0.1  # Adjust space between columns
+    )
+    
+    # Add traces for the time trends plot
+    metrics = ['overall', 'relatable', 'inspiring', 'likable', 'relevant']
+    for metric in metrics:
+        yearly_means = df.groupby('year')[metric].mean()
+        fig.add_trace(go.Scatter(
+            x=yearly_means.index,
+            y=yearly_means.values,
+            name=metric.capitalize(),
+            mode='lines+markers'
+        ), row=1, col=1)
+    
+    # Add traces for the demographic comparison plot
+    fig.add_trace(go.Box(
+        x=df['demo'],
+        y=df['overall'],
+        name='Overall',
+        marker_color='blue'
+    ), row=1, col=2)
+    
+    # Add traces for the heatmap
+    pivot_table = df.pivot_table(
+        values=metrics,
+        index='demo',
+        aggfunc='mean'
+    )
+    fig.add_trace(go.Heatmap(
+        z=pivot_table.values,
+        x=pivot_table.columns,
+        y=pivot_table.index,
+        colorscale='RdBu',
+        text=np.round(pivot_table.values, 2),
+        texttemplate='%{text}',
+        textfont={"size": 10},
+        showscale=True,
+        colorbar=dict(
+            len=0.5,         # Length of colorbar
+            y=0.25,          # Position of colorbar
+            yanchor='middle' # Anchor point for y position
+        )
+    ), row=2, col=1)
+    
+    # Add traces for the year comparison plot
+    fig.add_trace(go.Box(
+        x=df['year'],
+        y=df['overall'],
+        name='Overall',
+        marker_color='green'
+    ), row=2, col=2)
+    
+    # Update layout with better spacing and formatting
+    fig.update_layout(
+        height=800,           # Reduced height
+        width=1200,
+        title_text="Survey Results Dashboard",
+        showlegend=True,
+        legend=dict(
+            orientation="h",   # Horizontal legend
+            yanchor="bottom",
+            y=1.02,           # Position legend above the plots
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Update axes labels and tick angles
+    fig.update_xaxes(tickangle=45)  # Angle the x-axis labels
+    
+    return fig
+
+
+# Create and show dashboard
+dashboard = create_dashboard(survey_results)
+dashboard.show()
