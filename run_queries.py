@@ -14,15 +14,16 @@ argdefaults = {
     'port': 5432,
     'dbname': 'datasets',
     'user': 'postgres',
-    'table': 'reddit.submissions'
+    'table': 'reddit.submissions',
+    'search_terms': 'elon|musk'
 }
 
-def export_submissions(dataset, output_folder, hostaddr, table, port, dbname, user):
+def export_submissions(dataset, output_folder, hostaddr, table, port, dbname, user, search_terms):
     """Exports data for a specific monthly dataset to a CSV file."""
+    first_term = search_terms.split('|')[0]
+    filename = os.path.join(output_folder, f"submissions_{first_term}_{dataset}.csv")
     print(f"Starting export for dataset: {dataset}")
     try:
-        filename = os.path.join(output_folder, f"submissions_musk_{dataset}.csv")
-        
         with psycopg.connect(
             dbname=dbname,
             user=user,
@@ -36,8 +37,8 @@ def export_submissions(dataset, output_folder, hostaddr, table, port, dbname, us
                         FROM reddit.submissions
                         WHERE dataset = '{dataset}'
                         AND (
-                            title ~* '\\m(elon|musk)\\M' OR
-                            selftext ~* '\\m(elon|musk)\\M'
+                            title ~* '\\m({search_terms})\\M' OR
+                            selftext ~* '\\m({search_terms})\\M'
                         )
                     ) TO '{filename}' 
                     WITH CSV HEADER 
@@ -57,12 +58,12 @@ def export_submissions(dataset, output_folder, hostaddr, table, port, dbname, us
         print(f"Failed export for {dataset}: {str(e)}")
         return f"Error exporting {dataset}: {str(e)}"
 
-def export_comments(dataset, output_folder, hostaddr, table, port, dbname, user):
+def export_comments(dataset, output_folder, hostaddr, table, port, dbname, user, search_terms):
     """Exports comment data for a specific monthly dataset to a CSV file."""
+    first_term = search_terms.split('|')[0]
+    filename = os.path.join(output_folder, f"comments_{first_term}_{dataset}.csv")
     print(f"Starting comment export for dataset: {dataset}")
     try:
-        filename = os.path.join(output_folder, f"comments_musk_{dataset}.csv")
-        
         with psycopg.connect(
             dbname=dbname,
             user=user,
@@ -75,7 +76,7 @@ def export_comments(dataset, output_folder, hostaddr, table, port, dbname, user)
                         SELECT dataset, created_utc, id, author, score, author_created_utc, subreddit, body
                         FROM reddit.comments
                         WHERE dataset = '{dataset}'
-                        AND body ~* '\\m(elon|musk)\\M'
+                        AND body ~* '\\m({search_terms})\\M'
                     ) TO '{filename}' 
                     WITH CSV HEADER 
                     QUOTE '"' 
@@ -108,6 +109,7 @@ def main():
     parser.add_argument('--workers', type=int, help='Number of workers for parallel processing.', default=1)
     parser.add_argument('--type', choices=['submissions', 'comments', 'both'], 
                        default='both', help='Type of data to export: submissions, comments, or both')
+    parser.add_argument('--search_terms', type=str, help='Search terms separated by |', default=argdefaults['search_terms'])
     args = parser.parse_args()
 
     # Generate list of monthly datasets based on date range
@@ -147,7 +149,8 @@ def main():
         table=args.table,
         port=args.port,
         dbname=args.dbname,
-        user=args.user
+        user=args.user,
+        search_terms=args.search_terms
     )
 
     process_comments = partial(
@@ -157,7 +160,8 @@ def main():
         table=args.table,
         port=args.port,
         dbname=args.dbname,
-        user=args.user
+        user=args.user,
+        search_terms=args.search_terms
     )
 
     # Run queries based on type selection
