@@ -255,7 +255,7 @@ def process_date_range(args, data_type, batch_size):
     
     # Generate file paths
     files = [
-        os.path.join(args.input_folder, f"{data_type}_musk_{date}.csv") 
+        os.path.join(args.input_folder, f"{data_type}_{args.celebrity}_{date}.csv")
         for date in dates
     ]
     
@@ -288,6 +288,8 @@ def main():
                        default=None)
     parser.add_argument('--date_max', required=True, 
                        help='Maximum date (YYYY-MM) to process')
+    parser.add_argument('--celebrity', type=str, required=True,
+                       help='Celebrity name to process (e.g., "musk")')
     args = parser.parse_args()
 
     # Create output directory if it doesn't exist
