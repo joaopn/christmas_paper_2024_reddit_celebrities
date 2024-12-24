@@ -330,7 +330,6 @@ def plot_distributions(data_dict, metrics, periods, title=None):
     
     return fig
 
-
 def tab10_to_hex(tab_color):
     """
     Convert a tab10 color name to its hex value for plotly.
@@ -361,7 +360,6 @@ def tab10_to_hex(tab_color):
         raise ValueError(f"Color '{tab_color}' not found in tab10 palette")
         
     return tab10_colors[tab_color]
-
 
 def survey_dashboard(df):
     fig = make_subplots(
@@ -442,8 +440,3 @@ def survey_dashboard(df):
     fig.update_xaxes(tickangle=45)  # Angle the x-axis labels
     
     return fig
-
-
-# Create and show dashboard
-dashboard = create_dashboard(survey_results)
-dashboard.show()

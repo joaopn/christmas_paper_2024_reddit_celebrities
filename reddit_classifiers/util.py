@@ -185,7 +185,6 @@ def load_data(file_pattern, start_date=None, end_date=None, data_type='both'):
     return results
 
 
-
 def print_stats(data_dict):
     """
     Print basic statistics for each DataFrame in the provided dictionary.
@@ -251,6 +250,7 @@ def filter_threshold(data_dict, field='word_count', threshold=20):
         print(f"\nFiltering {key} on {field} >= {threshold}: {len(df):,} -> {len(filtered_dict[key]):,} entries ({len(df) - len(filtered_dict[key]):,} removed)")
         
     return filtered_dict
+
 def remove_duplicates(data_dict, text_col='text'):
     """
     Remove entries with duplicated text content from a DataFrame.
@@ -349,7 +349,6 @@ def remove_users(data_dict, users=['[deleted]', '[removed]', 'automoderator'], b
                 print(f"Content removed from bot users: {bot_content:,} entries")
             
     return filtered_dict
-
 
 def remove_submission_heavy_subreddits(data_dict, submission_threshold=0.05, comment_threshold=0.02):
     """
